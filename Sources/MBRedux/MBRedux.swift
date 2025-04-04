@@ -9,7 +9,7 @@ import Combine
 public protocol ReduxAction {
     /** Use to all action*/
 }
-
+// MARK: - StateType
 /// Protocol that represents the state in the Redux flow.
 /// The state must conform to `Hashable` to enable comparisons based on hash values.
 public protocol StateType: Hashable {
@@ -24,16 +24,34 @@ public extension StateType {
     }
 }
 
+// MARK: -
 // Typealias that defines the `Reducer` type.
 // A `Reducer` takes a `ReduxAction` and a current state (`S?`) and returns an updated state (`S?`).
 public typealias Reducer<S: StateType> = (ReduxAction, S?) -> S?
 
+// MARK: - ReduxStatePublisherType
+
+/// A protocol that defines methods for publishing state updates in a Redux-style architecture.
 protocol ReduxStatePublisherType<S> {
+    
+    /// The associated type that conforms to the `StateType` protocol, representing the application's state.
     associatedtype S: StateType
+    
+    // MARK: Methods
+    
+    /// Called before the state is updated. This can be used for any preparations or actions before the update occurs.
+    /// - Parameter state: The current state that is about to be updated, or `nil` if no previous state exists.
     func willUpdateState(_ state: S?)
+    
+    /// Called after the state has been updated. This can be used to trigger actions or updates in response to the new state.
+    /// - Parameter state: The updated state, or `nil` if the state was reset.
     func didUpdateState(_ state: S?)
 }
 
+// MARK: - ReduxSubscription
+
+/// A private class that conforms to the `ReduxStatePublisherType` protocol.
+/// This class handles the subscription to state updates and allows for reacting to changes in the state.
 private class ReduxSubscription<S: StateType>: ReduxStatePublisherType {
     
     // Publishers to track the state before and after an update
@@ -83,13 +101,31 @@ private class ReduxSubscription<S: StateType>: ReduxStatePublisherType {
     }
 }
 
+// MARK: - ReduxStoreType
 
+/// A protocol that defines the required methods for a Redux store.
+/// This protocol is responsible for providing access to the application's state
+/// and dispatching actions to update the state.
 protocol ReduxStoreType<S> {
+    /// The associated type that conforms to the `StateType` protocol, representing the store's state.
     associatedtype S: StateType
+    
+    /// Returns the current state of the store.
+    /// - Returns: The current state of type `S`, or `nil` if the state is not available.
     func getState() -> S?
+    
+    /// Dispatches an action to the store, triggering a state update via the provided reducer.
+    /// - Parameters:
+    ///   - action: The action that represents a change or event in the application.
+    ///   - reducer: The reducer that will handle the action and update the state accordingly.
     func dispatch(action: ReduxAction, reducer: Reducer<S>)
 }
 
+// MARK: - ReduxStore
+
+/// A private class that conforms to the `ReduxStoreType` protocol.
+/// This class is responsible for managing the application's state and dispatching actions
+/// to update the state using a reducer.
 private class ReduxStore<S: StateType>: ReduxStoreType {
     // A dedicated queue to synchronize state changes and actions.
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
@@ -118,44 +154,32 @@ private class ReduxStore<S: StateType>: ReduxStoreType {
             publisher.didUpdateState(state)
         }
     }
+    
     /// Get current state
     func getState() -> S? {
         state
     }
-    
-    
 }
 
-/// ReduxStore class encapsulates the entire Redux flow for managing the state.
-/// This class includes functionality to register reducers, dispatch actions, and manage state updates.
+/// Redux class encapsulates the entire Redux flow.
+/// This class includes functionality to dispatch actions, and state subscription.
 public class Redux<S: StateType> {
     
     // The current state of the store, which can be nil initially.
     private let store: any ReduxStoreType<S>
+    // Manage all subscriptions
     private let subscription: ReduxSubscription<S> = .init()
-    init() {
-        store = ReduxStore<S>.init(publisher: subscription)
-    }
     // The reducer to manage state changes, initialized when registered.
-    private var reducer: Reducer<S>?
+    private let reducer: Reducer<S>
     
-    /// Registers a reducer function, but ensures that it can only be registered once.
-    /// Throws an error if a reducer is already registered.
-    public func register(reducer: @escaping Reducer<S>) throws {
-        guard self.reducer == nil else {
-            // Throw error if a reducer is already registered.
-            throw NSError(domain: "ReduxError.reducerAlreadyRegistered", code: -1)
-        }
-        // Initialize the ReduxReducer with the provided reducer function.
+    public init(reducer: @escaping Reducer<S>) {
         self.reducer = reducer
+        store = ReduxStore<S>.init(publisher: subscription)
     }
     
     /// Dispatches an action to update the state.
     /// The state is updated inside a sync block to ensure thread safety.
     public func dispatch(_ action: ReduxAction) {
-        guard let reducer else {
-            return
-        }
         store.dispatch(action: action, reducer: reducer)
     }
     
