@@ -6,19 +6,19 @@ import Combine
 
 /// Protocol representing an action in the Redux flow.
 /// Any action that is dispatched must conform to this protocol.
-protocol ReduxAction {
+public protocol ReduxAction {
     /** Use to all action*/
 }
 
 /// Protocol that represents the state in the Redux flow.
 /// The state must conform to `Hashable` to enable comparisons based on hash values.
-protocol StateType: Hashable {
+public protocol StateType: Hashable {
     /** Must be adopted by state*/
 }
 
 /// Extend the `StateType` protocol to provide a custom equality operator (`==`).
 /// This compares two `StateType` instances by their `hashValue`.
-extension StateType {
+public extension StateType {
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.hashValue == rhs.hashValue
     }
@@ -26,13 +26,13 @@ extension StateType {
 
 // Typealias that defines the `Reducer` type.
 // A `Reducer` takes a `ReduxAction` and a current state (`S?`) and returns an updated state (`S?`).
-typealias Reducer<S: StateType> = (ReduxAction, S?) -> S?
+public typealias Reducer<S: StateType> = (ReduxAction, S?) -> S?
 
 // Private struct to encapsulate the reducer logic.
 // This struct holds the reducer function and provides an `apply` method to apply actions to the state.
 private struct ReduxReducer<S: StateType> {
     // The reducer function
-    let reducer: Reducer<S>
+    private let reducer: Reducer<S>
     
     // Initializer to set the reducer function
     init(reducer: @escaping Reducer<S>) {
@@ -98,7 +98,7 @@ private struct ReduxSubscription<S: StateType> {
 
 /// ReduxStore class encapsulates the entire Redux flow for managing the state.
 /// This class includes functionality to register reducers, dispatch actions, and manage state updates.
-class ReduxStore<S: StateType> {
+public class ReduxStore<S: StateType> {
     
     // The current state of the store, which can be nil initially.
     private var state: S?
@@ -113,24 +113,24 @@ class ReduxStore<S: StateType> {
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
     
     /// Initializes an empty store with no state.
-    init () {
+    public init() {
         self.state = nil
     }
     
     /// Registers a reducer function, but ensures that it can only be registered once.
     /// Throws an error if a reducer is already registered.
-    func register(reducer: @escaping Reducer<S>) throws {
+    public func register(reducer: @escaping Reducer<S>) throws {
         guard self.reducer == nil else {
             // Throw error if a reducer is already registered.
             throw NSError(domain: "ReduxError.reducerAlreadyRegistered", code: -1)
         }
         // Initialize the ReduxReducer with the provided reducer function.
-        self.reducer = .init(reducer: reducer)
+        self.reducer = ReduxReducer(reducer: reducer)
     }
     
     /// Dispatches an action to update the state.
     /// The state is updated inside a sync block to ensure thread safety.
-    func dispatch(_ action: ReduxAction) {
+    public func dispatch(_ action: ReduxAction) {
         reduxQueue.sync { [weak self] in
             guard let self else {
                 return
@@ -145,22 +145,22 @@ class ReduxStore<S: StateType> {
     }
     
     /// Returns a publisher that emits the entire state when it changes.
-    func subscribe() -> AnyPublisher<S?, Never> {
+    public func subscribe() -> AnyPublisher<S?, Never> {
         subscription.subscribe()
     }
     
     /// Returns a publisher that emits a specific part of the state (based on the path) when it changes.
-    func subscribe<P: Hashable>(path: KeyPath<S, P>) -> AnyPublisher<P, Never> {
+    public func subscribe<P: Hashable>(path: KeyPath<S, P>) -> AnyPublisher<P, Never> {
         subscription.subscribe(path: path)
     }
     
     /// Return value of State
-    func getState() -> S? {
+    public func getState() -> S? {
         state
     }
     
     /// Return value at specifed path from state
-    func getState<P>(path: KeyPath<S, P>) -> P? {
+    public func getState<P>(path: KeyPath<S, P>) -> P? {
         getState()?[keyPath: path]
     }
 }
