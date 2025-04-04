@@ -29,7 +29,7 @@ private enum MockReducer {
 final class ReduxStoreTests: XCTestCase {
     
     // The Redux store instance to test
-    private var store: ReduxStore<TestState>!
+    private var store: Redux<TestState>!
     
     // The cancellables to hold subscriptions
     var cancellables: Set<AnyCancellable> = []
@@ -37,7 +37,7 @@ final class ReduxStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = ReduxStore<TestState>()
+        store = Redux<TestState>()
     }
     
     override func tearDown() {
