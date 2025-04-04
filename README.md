@@ -1,2 +1,2 @@
 # MBRedux
-Redux is a swift library that manages state. 
+##### Please refer to [release](https://github.com/swifty-iOS/MBRedux/tree/release) branch. 
