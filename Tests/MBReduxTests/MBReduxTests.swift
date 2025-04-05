@@ -4,20 +4,20 @@
 // Created by Manish on 03/04/25.
 //
 
-import XCTest
 import Combine
 @testable import MBRedux
+import XCTest
 
 // Define a simple test state and action
 private class TestState: StateType, Hashable {
     let value: Int
     var user: MockSateUser?
-    
+
     init(value: Int, user: MockSateUser? = nil) {
         self.value = value
         self.user = user
     }
-    
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(value)
     }
@@ -25,16 +25,15 @@ private class TestState: StateType, Hashable {
 
 private class MockSateUser: StateType, Equatable {
     let username: String
-    
+
     init(username: String) {
         self.username = username
     }
-    
+
     func hash(into hasher: inout Hasher) {
         hasher.combine(username)
     }
 }
-
 
 private enum TestAction: ReduxAction {
     case increment
@@ -44,13 +43,12 @@ private enum TestAction: ReduxAction {
 }
 
 private func mockReducer(action: ReduxAction, state: TestState?) -> TestState? {
-   
     switch action {
     case TestAction.increment:
         return TestState(value: (state?.value ?? 0) + 1, user: state?.user)
     case TestAction.decrement:
         return TestState(value: (state?.value ?? 0) - 1, user: state?.user)
-    case TestAction.user(let username):
+    case let TestAction.user(username):
         let newState = state ?? TestState(value: 0)
         newState.user = .init(username: username)
         return newState
@@ -60,26 +58,25 @@ private func mockReducer(action: ReduxAction, state: TestState?) -> TestState? {
 }
 
 final class ReduxStoreTests: XCTestCase {
-    
     // The Redux store instance to test
     private var store: Redux<TestState>!
     let testUserName = "testuser"
     // The cancellables to hold subscriptions
     var cancellables: Set<AnyCancellable> = []
-    
+
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
         store = Redux<TestState>(reducer: mockReducer)
     }
-    
+
     override func tearDown() {
         // Reset the store and cancellables after each test
         cancellables.removeAll()
         store = nil
         super.tearDown()
     }
-    
+
     func testDispatchAction() {
         // Dispatch actions
         store.dispatch(TestAction.increment)
@@ -88,7 +85,7 @@ final class ReduxStoreTests: XCTestCase {
         XCTAssertEqual(store.getState()?.value, 2)
         XCTAssertEqual(store.getState(path: \.value), 2)
     }
-    
+
     @MainActor
     func testStateSubscription() {
         // Expectation for state change subscription
@@ -100,14 +97,14 @@ final class ReduxStoreTests: XCTestCase {
                 }
             }
             .store(in: &cancellables)
-        
+
         // Dispatch increment action
         store.dispatch(TestAction.increment)
-        
+
         // Wait for the state change to be triggered
         wait(for: [expectation], timeout: 0.5)
     }
-    
+
     @MainActor
     func testStatePathSubscription() {
         // Expectation for state path change subscription
@@ -124,7 +121,7 @@ final class ReduxStoreTests: XCTestCase {
         // Wait for the state path change to be triggered
         wait(for: [expectation], timeout: 0.5)
     }
-    
+
     @MainActor
     func testStateTypeSubscription() {
         // Expectation for state path change subscription
@@ -141,7 +138,7 @@ final class ReduxStoreTests: XCTestCase {
         // Wait for the state path change to be triggered
         wait(for: [expectation], timeout: 0.5)
     }
-    
+
     // If this fails adjust timout
     @MainActor
     func testNoStateChange() {
@@ -166,5 +163,4 @@ final class ReduxStoreTests: XCTestCase {
         // Wait for both before and after state update expectations
         wait(for: [expectation], timeout: 1)
     }
-    
 }
