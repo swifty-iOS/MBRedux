@@ -42,14 +42,14 @@ private enum TestAction: ReduxAction {
     case user(String)
 }
 
-private func mockReducer(action: ReduxAction, state: TestState?) -> TestState? {
+private func mockReducer(action: ReduxAction, state: TestState) -> TestState {
     switch action {
     case TestAction.increment:
-        return TestState(value: (state?.value ?? 0) + 1, user: state?.user)
+        return TestState(value: (state.value) + 1, user: state.user)
     case TestAction.decrement:
-        return TestState(value: (state?.value ?? 0) - 1, user: state?.user)
+        return TestState(value: (state.value) - 1, user: state.user)
     case let TestAction.user(username):
-        let newState = state ?? TestState(value: 0)
+        let newState = state
         newState.user = .init(username: username)
         return newState
     default:
@@ -67,7 +67,7 @@ final class ReduxStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = Redux<TestState>(reducer: mockReducer)
+        store = Redux<TestState>(reducer: mockReducer, state: TestState(value: 0))
     }
 
     override func tearDown() {
@@ -82,17 +82,16 @@ final class ReduxStoreTests: XCTestCase {
         store.dispatch(TestAction.increment)
         store.dispatch(TestAction.increment)
         // Check the state after dispatching
-        XCTAssertEqual(store.getState()?.value, 2)
+        XCTAssertEqual(store.getState().value, 2)
         XCTAssertEqual(store.getState(path: \.value), 2)
     }
 
-    @MainActor
     func testStateSubscription() {
         // Expectation for state change subscription
         let expectation = expectation(description: "State should be updated")
         store.subscribe()
             .sink { newState in
-                if newState?.value == 1 {
+                if newState.value == 1 {
                     expectation.fulfill() // Fulfill when state is updated to value 1
                 }
             }
@@ -105,11 +104,11 @@ final class ReduxStoreTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 
-    @MainActor
+    
     func testStatePathSubscription() {
         // Expectation for state path change subscription
         let expectation = self.expectation(description: "State path value should be updated")
-        store.subscribe(path: \TestState.value)
+        store.subscribe(path: \.value)
             .sink { newValue in
                 if newValue == 1 {
                     expectation.fulfill() // Fulfill when value is updated to 1
@@ -122,7 +121,6 @@ final class ReduxStoreTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 
-    @MainActor
     func testStateTypeSubscription() {
         // Expectation for state path change subscription
         let expectation = self.expectation(description: "State type should be updated")
@@ -139,8 +137,8 @@ final class ReduxStoreTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 
-    // If this fails adjust timout
     @MainActor
+    // If this fails adjust timout
     func testNoStateChange() {
         let testUserName = "testuser"
         // Expectation for state path change subscription
@@ -162,5 +160,63 @@ final class ReduxStoreTests: XCTestCase {
         }
         // Wait for both before and after state update expectations
         wait(for: [expectation], timeout: 1)
+    }
+}
+
+// MARK: -
+
+final class ReduxStoreOptinalTests: XCTestCase {
+    
+    struct SomeAction: ReduxAction {
+        let name: String?
+    }
+    
+    static func mockOptionalReducer(_ action: ReduxAction?, _ state: TestState?) -> TestState? {
+        if let action = action as? SomeAction {
+            return TestState(name: action.name)
+        }
+        return state
+    }
+    
+    struct TestState: StateType {
+        var name: String?
+    }
+    
+    private var store: Redux<TestState?>!
+    let testUserName = "testuser"
+    // The cancellables to hold subscriptions
+    var cancellables: Set<AnyCancellable> = []
+    
+    override func setUp() {
+        super.setUp()
+        // Initialize the store with an initial state
+        store = Redux<TestState?>(reducer: Self.mockOptionalReducer, state: nil)
+    }
+
+    override func tearDown() {
+        // Reset the store and cancellables after each test
+        cancellables.removeAll()
+        store = nil
+        super.tearDown()
+    }
+    
+    func testOptionalRedux() {
+        XCTAssertNil(store.getState())
+        store.dispatch(SomeAction(name: nil))
+        XCTAssertNotNil(store.getState())
+        XCTAssertNil(store.getState()?.name)
+        
+        let expectation = self.expectation(description: "State type should be updated")
+        store.subscribe(path: \.self?.name)
+            .sink { name in
+                if name == "test" {
+                    expectation.fulfill() // Fulfill when value is updated to 1
+                }
+            }
+            .store(in: &cancellables)
+        // Dispatch increment action
+        store.dispatch(SomeAction(name: "test"))
+        // Wait for the state path change to be triggered
+        wait(for: [expectation], timeout: 0.5)
     }
 }
