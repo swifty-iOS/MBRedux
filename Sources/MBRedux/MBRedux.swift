@@ -21,6 +21,11 @@ public protocol StateType: Hashable {
     /** Must be adopted by state */
 }
 
+/// Allow optional state type
+extension Optional: StateType where Wrapped: StateType {
+    /** use optional state now if required */
+}
+
 /// Extend the `StateType` protocol to provide a custom equality operator (`==`).
 /// This compares two `StateType` instances by their `hashValue`.
 public extension StateType {
@@ -33,7 +38,7 @@ public extension StateType {
 
 // Typealias that defines the `Reducer` type.
 // A `Reducer` takes a `ReduxAction` and a current state (`S?`) and returns an updated state (`S?`).
-public typealias Reducer<StateType> = (ReduxAction, StateType?) -> StateType?
+public typealias Reducer<StateType> = (ReduxAction, StateType) -> StateType
 
 // MARK: - ReduxStatePublisherType
 
@@ -47,11 +52,11 @@ protocol ReduxStatePublisherType<State> {
 
     /// Called before the state is updated. This can be used for any preparations or actions before the update occurs.
     /// - Parameter state: The current state that is about to be updated, or `nil` if no previous state exists.
-    func willUpdateState(_ state: State?)
+    func willUpdateState(_ state: State)
 
     /// Called after the state has been updated. This can be used to trigger actions or updates in response to the new state.
     /// - Parameter state: The updated state, or `nil` if the state was reset.
-    func didUpdateState(_ state: State?)
+    func didUpdateState(_ state: State)
 }
 
 // MARK: - ReduxSubscription
@@ -60,22 +65,22 @@ protocol ReduxStatePublisherType<State> {
 /// This class handles the subscription to state updates and allows for reacting to changes in the state.
 private class ReduxSubscription<S: StateType>: ReduxStatePublisherType {
     // Publishers to track the state before and after an update
-    private let beforeSateUpdate = PassthroughSubject<S?, Never>()
-    private let afterStateUpdate = PassthroughSubject<S?, Never>()
+    private let beforeSateUpdate = PassthroughSubject<S, Never>()
+    private let afterStateUpdate = PassthroughSubject<S, Never>()
 
     /// Sends the state before it is updated
-    func willUpdateState(_ state: S?) {
+    func willUpdateState(_ state: S) {
         beforeSateUpdate.send(state)
     }
 
     /// Sends the state after it is updated
-    func didUpdateState(_ state: S?) {
+    func didUpdateState(_ state: S) {
         afterStateUpdate.send(state)
     }
 
     /// Combines `beforeStateUpdate` and `afterStateUpdate` to emit the new state only when it changes.
     /// This is useful for notifying subscribers only when the state actually changes.
-    func subscribe() -> AnyPublisher<S?, Never> {
+    func subscribe() -> AnyPublisher<S, Never> {
         beforeSateUpdate
             .combineLatest(afterStateUpdate)
             .filter {
@@ -90,11 +95,11 @@ private class ReduxSubscription<S: StateType>: ReduxStatePublisherType {
     func subscribe<P: Hashable>(path: KeyPath<S, P>) -> AnyPublisher<P, Never> {
         beforeSateUpdate.map {
             // Access the state at the specific path before the update
-            $0?[keyPath: path]
+            $0[keyPath: path]
         }.combineLatest(
             afterStateUpdate.map {
                 // Access the state at the specific path after the update
-                $0?[keyPath: path]
+                $0[keyPath: path]
             }
         ).filter {
             // Only emit when the value at the specific path has changed
@@ -117,7 +122,7 @@ protocol ReduxStoreType<State> {
 
     /// Returns the current state of the store.
     /// - Returns: The current state of type `S`, or `nil` if the state is not available.
-    func getState() -> State?
+    func getState() -> State
 
     /// Dispatches an action to the store, triggering a state update via the provided reducer.
     /// - Parameters:
@@ -135,13 +140,13 @@ private class ReduxStore<S: StateType>: ReduxStoreType {
     // A dedicated queue to synchronize state changes and actions.
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
     // The current state of the store, which can be nil initially.
-    var state: S?
+    var state: S
     // Subscription manager to handle state change notifications.
     let publisher: any ReduxStatePublisherType<S>
 
-    init(publisher: any ReduxStatePublisherType<S>) {
+    init(publisher: any ReduxStatePublisherType<S>, state: S) {
         self.publisher = publisher
-        state = nil
+        self.state = state
     }
 
     /// Dispatches an action to update the state.
@@ -161,8 +166,10 @@ private class ReduxStore<S: StateType>: ReduxStoreType {
     }
 
     /// Get current state
-    func getState() -> S? {
-        state
+    func getState() -> S {
+        reduxQueue.sync {
+            state
+        }
     }
 }
 
@@ -176,9 +183,9 @@ public class Redux<S: StateType> {
     // The reducer to manage state changes, initialized when registered.
     private let reducer: Reducer<S>
 
-    public init(reducer: @escaping Reducer<S>) {
+    public init(reducer: @escaping Reducer<S>, state: S) {
         self.reducer = reducer
-        store = ReduxStore<S>(publisher: subscription)
+        store = ReduxStore<S>(publisher: subscription, state: state)
     }
 
     /// Dispatches an action to update the state.
@@ -188,7 +195,7 @@ public class Redux<S: StateType> {
     }
 
     /// Returns a publisher that emits the entire state when it changes.
-    public func subscribe() -> AnyPublisher<S?, Never> {
+    public func subscribe() -> AnyPublisher<S, Never> {
         subscription.subscribe()
     }
 
