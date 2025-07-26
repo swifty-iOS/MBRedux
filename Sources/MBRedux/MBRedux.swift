@@ -37,7 +37,7 @@ public extension StateType {
 // MARK: -
 
 // Typealias that defines the `Reducer` type.
-// A `Reducer` takes a `ReduxAction` and a current state (`S?`) and returns an updated state (`S?`).
+// A `Reducer` takes a `ReduxAction` and a current state (`StateType`) and returns an updated state (`StateType`).
 public typealias Reducer<StateType> = (ReduxAction, StateType) -> StateType
 
 // MARK: - ReduxStatePublisherType
@@ -205,12 +205,12 @@ public class Redux<S: StateType> {
     }
 
     /// Return value of State
-    public func getState() -> S? {
+    public func getState() -> S {
         store.getState()
     }
 
     /// Return value at specifed path from state
-    public func getState<P>(path: KeyPath<S, P>) -> P? {
-        getState()?[keyPath: path]
+    public func getState<P>(path: KeyPath<S, P>) -> P {
+        getState()[keyPath: path]
     }
 }
