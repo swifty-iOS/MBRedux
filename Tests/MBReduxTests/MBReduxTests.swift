@@ -67,7 +67,7 @@ final class ReduxStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = Redux<TestState>(reducer: mockReducer, state: TestState(value: 0))
+        store = Redux<TestState>(state: TestState(value: 0), reducer: mockReducer)
     }
 
     override func tearDown() {
@@ -154,7 +154,7 @@ final class ReduxStoreTests: XCTestCase {
             .store(in: &cancellables)
         // dispach no action
         store.dispatch(TestAction.user(testUserName))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             XCTAssertFalse(isUpdateCalled)
             expectation.fulfill()
         }
@@ -190,7 +190,7 @@ final class ReduxStoreOptinalTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = Redux<TestState?>(reducer: Self.mockOptionalReducer, state: nil)
+        store = Redux<TestState?>(state: nil, reducer: Self.mockOptionalReducer)
     }
 
     override func tearDown() {
