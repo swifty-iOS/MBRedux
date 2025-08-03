@@ -104,7 +104,6 @@ final class ReduxStoreTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 
-    
     func testStatePathSubscription() {
         // Expectation for state path change subscription
         let expectation = self.expectation(description: "State path value should be updated")
@@ -166,27 +165,26 @@ final class ReduxStoreTests: XCTestCase {
 // MARK: -
 
 final class ReduxStoreOptinalTests: XCTestCase {
-    
     struct SomeAction: ReduxAction {
         let name: String?
     }
-    
+
     static func mockOptionalReducer(_ action: ReduxAction?, _ state: TestState?) -> TestState? {
         if let action = action as? SomeAction {
             return TestState(name: action.name)
         }
         return state
     }
-    
+
     struct TestState: StateType {
         var name: String?
     }
-    
+
     private var store: Redux<TestState?>!
     let testUserName = "testuser"
     // The cancellables to hold subscriptions
     var cancellables: Set<AnyCancellable> = []
-    
+
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
@@ -199,13 +197,13 @@ final class ReduxStoreOptinalTests: XCTestCase {
         store = nil
         super.tearDown()
     }
-    
+
     func testOptionalRedux() {
         XCTAssertNil(store.getState())
         store.dispatch(SomeAction(name: nil))
         XCTAssertNotNil(store.getState())
         XCTAssertNil(store.getState()?.name)
-        
+
         let expectation = self.expectation(description: "State type should be updated")
         store.subscribe(path: \.self?.name)
             .sink { name in
@@ -220,9 +218,10 @@ final class ReduxStoreOptinalTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 }
+
 // MARK: -
+
 final class ReduxStoreMiddleTests: XCTestCase {
-    
     // The Redux store instance to test
     private var store: Redux<TestState>!
     let testUserName = "testuser"
@@ -232,9 +231,11 @@ final class ReduxStoreMiddleTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = Redux<TestState>(state: TestState(value: 0),
-                                 middlewares: [Self.incrementMiddleware, Self.decrementMiddleware],
-                                 reducer: mockReducer)
+        store = Redux<TestState>(
+            state: TestState(value: 0),
+            middlewares: [Self.incrementMiddleware, Self.decrementMiddleware],
+            reducer: mockReducer
+        )
     }
 
     override func tearDown() {
@@ -243,7 +244,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         store = nil
         super.tearDown()
     }
-    
+
     @MainActor
     func testMiddlewareIncrement() {
         let expectation = expectation(description: "State should not be updated")
@@ -263,7 +264,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         // Wait for the state change to be triggered
         wait(for: [expectation], timeout: 0.5)
     }
-    
+
     @MainActor
     func testMiddlewareDecrement() {
         let expectation = expectation(description: "State should not be updated")
@@ -273,17 +274,18 @@ final class ReduxStoreMiddleTests: XCTestCase {
                 expectation.fulfill()
             }
             .store(in: &cancellables)
-        
+
         // Dispatch increment action
         store.dispatch(TestAction.decrement)
         // Wait for the state change to be triggered
         wait(for: [expectation], timeout: 0.5)
     }
-    
+
     // MARK: -  Mock middleware
-    fileprivate static func incrementMiddleware(state: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
+
+    fileprivate static func incrementMiddleware(state _: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
         return { next in
-            return { action in
+            { action in
                 if (action as? TestAction) == .increment {
                     next(TestAction.noChange)
                 } else {
@@ -292,11 +294,12 @@ final class ReduxStoreMiddleTests: XCTestCase {
             }
         }
     }
-    
+
     // MARK: -  Mock middleware
-    fileprivate static func decrementMiddleware(state: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
+
+    fileprivate static func decrementMiddleware(state _: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
         return { next in
-            return { action in
+            { action in
                 if (action as? TestAction) == .decrement {
                     next(TestAction.increment)
                 } else {
