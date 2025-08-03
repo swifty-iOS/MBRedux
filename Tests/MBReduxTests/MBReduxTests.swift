@@ -281,7 +281,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 
-    // MARK: -  Mock middleware
+    // MARK: - Mock middleware
 
     fileprivate static func incrementMiddleware(state _: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
         return { next in
@@ -295,7 +295,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         }
     }
 
-    // MARK: -  Mock middleware
+    // MARK: - Mock middleware
 
     fileprivate static func decrementMiddleware(state _: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
         return { next in
