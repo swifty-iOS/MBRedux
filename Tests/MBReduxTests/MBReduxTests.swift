@@ -309,3 +309,90 @@ final class ReduxStoreMiddleTests: XCTestCase {
         }
     }
 }
+
+// MARK: -
+
+final class ReduxConcurrencyTests: XCTestCase, @unchecked Sendable {
+    private var redux: Redux<TestState>!
+    var cancellables = Set<AnyCancellable>()
+
+    override func setUp() {
+        super.setUp()
+        let reducer: Reducer<TestState> = { action, state in
+            switch action as? TestAction {
+            case .increment:
+                return TestState(value: state.value + 1)
+            default:
+                return state
+            }
+        }
+        redux = Redux(state: TestState(value: 0), reducer: reducer)
+    }
+
+    func testConcurrentDispatch() {
+        let expectation = XCTestExpectation(description: "Concurrent dispatches complete")
+
+        // Dispatch IncrementAction 1000 times concurrently
+        DispatchQueue.concurrentPerform(iterations: 1000) { _ in
+            self.redux.dispatch(TestAction.increment)
+        }
+
+        // Give some time for all async dispatches to complete
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+            // Check final state count should be 1000
+            XCTAssertEqual(self.redux.getState().value, 1000)
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 2.0)
+    }
+
+    func testSubscribeReceivesUpdates() {
+        let expectation = XCTestExpectation(description: "Subscriber receives state updates")
+
+        var receivedCounts = [Int]()
+
+        redux.subscribe()
+            .sink { state in
+                receivedCounts.append(state.value)
+                if state.value == 10 {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
+        for _ in 1 ... 10 {
+            redux.dispatch(TestAction.increment)
+        }
+
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(receivedCounts.last, 10)
+    }
+
+    func testConcurrentReadsAndWrites() {
+        let dispatchGroup = DispatchGroup()
+
+        for _ in 1 ... 500 {
+            dispatchGroup.enter()
+            DispatchQueue.global().async {
+                self.redux.dispatch(TestAction.increment)
+                dispatchGroup.leave()
+            }
+            dispatchGroup.enter()
+            DispatchQueue.global().async {
+                _ = self.redux.getState()
+                dispatchGroup.leave()
+            }
+        }
+
+        let expectation = XCTestExpectation(description: "Concurrent reads and writes complete")
+
+        dispatchGroup.notify(queue: .main) {
+            // Expect count to be 500 (all increments)
+            XCTAssertEqual(self.redux.getState().value, 500)
+            expectation.fulfill()
+        }
+
+        wait(for: [expectation], timeout: 3.0)
+    }
+}

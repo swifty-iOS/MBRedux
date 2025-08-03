@@ -135,7 +135,7 @@ protocol ReduxStoreType<State> {
     /// - Parameters:
     ///   - action: The action that represents a change or event in the application.
     ///   - reducer: The reducer that will handle the action and update the state accordingly.
-    func dispatch(action: ReduxAction, reducer: Reducer<State>)
+    func dispatch(action: ReduxAction, reducer: @escaping Reducer<State>)
 }
 
 // MARK: - ReduxStore
@@ -143,7 +143,7 @@ protocol ReduxStoreType<State> {
 /// A private class that conforms to the `ReduxStoreType` protocol.
 /// This class is responsible for managing the application's state and dispatching actions
 /// to update the state using a reducer.
-private final class ReduxStore<S: StateType>: ReduxStoreType {
+private final class ReduxStore<S: StateType>: ReduxStoreType, @unchecked Sendable {
     // A dedicated queue to synchronize state changes and actions.
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
     // The current state of the store, which can be nil initially.
@@ -158,11 +158,9 @@ private final class ReduxStore<S: StateType>: ReduxStoreType {
 
     /// Dispatches an action to update the state.
     /// The state is updated inside a sync block to ensure thread safety.
-    func dispatch(action: ReduxAction, reducer: Reducer<S>) {
-        reduxQueue.sync { [weak self] in
-            guard let self else {
-                return
-            }
+    func dispatch(action: ReduxAction, reducer: @escaping Reducer<S>) {
+        reduxQueue.async { [weak self] in
+            guard let self else { return }
             // Notify subscribers that the state will be updated.
             publisher.willUpdateState(state)
             // Apply the reducer to the current state and the action.
