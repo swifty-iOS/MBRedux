@@ -35,7 +35,7 @@ private class MockSateUser: StateType, Equatable {
     }
 }
 
-private enum TestAction: ReduxAction {
+private enum TestAction: ReduxAction, Equatable {
     case increment
     case decrement
     case noChange
@@ -67,7 +67,7 @@ final class ReduxStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = Redux<TestState>(reducer: mockReducer, state: TestState(value: 0))
+        store = Redux<TestState>(state: TestState(value: 0), reducer: mockReducer)
     }
 
     override func tearDown() {
@@ -154,7 +154,7 @@ final class ReduxStoreTests: XCTestCase {
             .store(in: &cancellables)
         // dispach no action
         store.dispatch(TestAction.user(testUserName))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             XCTAssertFalse(isUpdateCalled)
             expectation.fulfill()
         }
@@ -190,7 +190,7 @@ final class ReduxStoreOptinalTests: XCTestCase {
     override func setUp() {
         super.setUp()
         // Initialize the store with an initial state
-        store = Redux<TestState?>(reducer: Self.mockOptionalReducer, state: nil)
+        store = Redux<TestState?>(state: nil, reducer: Self.mockOptionalReducer)
     }
 
     override func tearDown() {
@@ -218,5 +218,91 @@ final class ReduxStoreOptinalTests: XCTestCase {
         store.dispatch(SomeAction(name: "test"))
         // Wait for the state path change to be triggered
         wait(for: [expectation], timeout: 0.5)
+    }
+}
+// MARK: -
+final class ReduxStoreMiddleTests: XCTestCase {
+    
+    // The Redux store instance to test
+    private var store: Redux<TestState>!
+    let testUserName = "testuser"
+    // The cancellables to hold subscriptions
+    var cancellables: Set<AnyCancellable> = []
+
+    override func setUp() {
+        super.setUp()
+        // Initialize the store with an initial state
+        store = Redux<TestState>(state: TestState(value: 0),
+                                 middlewares: [Self.incrementMiddleware, Self.decrementMiddleware],
+                                 reducer: mockReducer)
+    }
+
+    override func tearDown() {
+        // Reset the store and cancellables after each test
+        cancellables.removeAll()
+        store = nil
+        super.tearDown()
+    }
+    
+    @MainActor
+    func testMiddlewareIncrement() {
+        let expectation = expectation(description: "State should not be updated")
+        var isUpdateCalled = false
+        store.subscribe()
+            .sink { _ in
+                isUpdateCalled = true
+            }
+            .store(in: &cancellables)
+
+        // Dispatch increment action
+        store.dispatch(TestAction.increment)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            XCTAssertFalse(isUpdateCalled)
+            expectation.fulfill()
+        }
+        // Wait for the state change to be triggered
+        wait(for: [expectation], timeout: 0.5)
+    }
+    
+    @MainActor
+    func testMiddlewareDecrement() {
+        let expectation = expectation(description: "State should not be updated")
+        store.subscribe()
+            .sink { newState in
+                XCTAssertEqual(newState.value, 1)
+                expectation.fulfill()
+            }
+            .store(in: &cancellables)
+        
+        // Dispatch increment action
+        store.dispatch(TestAction.decrement)
+        // Wait for the state change to be triggered
+        wait(for: [expectation], timeout: 0.5)
+    }
+    
+    // MARK: -  Mock middleware
+    fileprivate static func incrementMiddleware(state: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
+        return { next in
+            return { action in
+                if (action as? TestAction) == .increment {
+                    next(TestAction.noChange)
+                } else {
+                    next(action)
+                }
+            }
+        }
+    }
+    
+    // MARK: -  Mock middleware
+    fileprivate static func decrementMiddleware(state: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
+        return { next in
+            return { action in
+                if (action as? TestAction) == .decrement {
+                    next(TestAction.increment)
+                } else {
+                    next(action)
+                }
+            }
+        }
     }
 }

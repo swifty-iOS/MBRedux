@@ -35,6 +35,13 @@ public extension StateType {
 }
 
 // MARK: -
+public typealias ReduxActionDispatch = (ReduxAction) -> Void
+
+public typealias ReduxMiddleware<StateType, ReduxAction> = (
+    StateType,
+    ReduxAction
+) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch
+
 
 // Typealias that defines the `Reducer` type.
 // A `Reducer` takes a `ReduxAction` and a current state (`StateType`) and returns an updated state (`StateType`).
@@ -136,7 +143,7 @@ protocol ReduxStoreType<State> {
 /// A private class that conforms to the `ReduxStoreType` protocol.
 /// This class is responsible for managing the application's state and dispatching actions
 /// to update the state using a reducer.
-private class ReduxStore<S: StateType>: ReduxStoreType {
+private final class ReduxStore<S: StateType>: ReduxStoreType {
     // A dedicated queue to synchronize state changes and actions.
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
     // The current state of the store, which can be nil initially.
@@ -173,25 +180,74 @@ private class ReduxStore<S: StateType>: ReduxStoreType {
     }
 }
 
+/// A helper class responsible for applying a series of Redux-style middleware functions
+/// to dispatched actions in a state container (e.g., a Redux store).
+///
+/// - Note: This implementation uses a static `state` and `action` at the time of middleware composition.
+///         If your middleware needs access to dynamic state or multiple actions, consider passing `getState` instead.
+private final class ReduxMiddlewareImp<S: StateType> {
+    
+    /// An array of middleware functions that operate on a specific state type and `ReduxAction`.
+    /// Each middleware can intercept, modify, or respond to dispatched actions.
+    let middlewares: [ReduxMiddleware<S, ReduxAction>]
+    
+    /// Initializes the middleware manager with a list of middleware functions.
+    ///
+    /// - Parameter middlewares: An array of middleware functions to be applied.
+    init(middlewares: [ReduxMiddleware<S, ReduxAction>]) {
+        self.middlewares = middlewares.reversed()
+    }
+    
+    /// Applies all middleware to a given dispatch chain.
+    ///
+    /// This function composes the middleware pipeline by wrapping the `baseDispatch`
+    /// function with each middleware, starting from the last and working backward.
+    ///
+    /// - Parameters:
+    ///   - state: The current state at the time of dispatch.
+    ///   - action: The action being dispatched.
+    ///   - baseDispatch: The base dispatch function, typically responsible for invoking the reducer.
+    ///
+    /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
+    func applyMiddlewares(
+        state: S,
+        action: ReduxAction,
+        baseDispatch: @escaping ReduxActionDispatch
+    ) -> ReduxActionDispatch {
+        return middlewares.reduce(baseDispatch) { next, middleware in
+            return middleware(state, action)(next)
+        }
+    }
+}
+
 /// Redux class encapsulates the entire Redux flow.
 /// This class includes functionality to dispatch actions, and state subscription.
-public class Redux<S: StateType> {
+public final class Redux<S: StateType> {
     // The current state of the store, which can be nil initially.
     private let store: any ReduxStoreType<S>
     // Manage all subscriptions
     private let subscription: ReduxSubscription<S> = .init()
     // The reducer to manage state changes, initialized when registered.
     private let reducer: Reducer<S>
+    // The middleware for side-effects
+    private let middleware: ReduxMiddlewareImp<S>
 
-    public init(reducer: @escaping Reducer<S>, state: S) {
+    public init(state: S, middlewares: [ReduxMiddleware<S, ReduxAction>] = [], reducer: @escaping Reducer<S>) {
         self.reducer = reducer
         store = ReduxStore<S>(publisher: subscription, state: state)
+        middleware = .init(middlewares: middlewares)
     }
 
     /// Dispatches an action to update the state.
     /// The state is updated inside a sync block to ensure thread safety.
     public func dispatch(_ action: ReduxAction) {
-        store.dispatch(action: action, reducer: reducer)
+       let dispatcher = middleware.applyMiddlewares(
+            state: getState(),
+            action: action
+        ) { [weak self] action in guard let self else { return }
+            store.dispatch(action: action, reducer: reducer)
+        }
+        dispatcher(action)
     }
 
     /// Returns a publisher that emits the entire state when it changes.
