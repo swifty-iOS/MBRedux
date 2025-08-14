@@ -39,7 +39,7 @@ public extension StateType {
 public typealias ReduxActionDispatch = (ReduxAction) -> Void
 
 public typealias ReduxMiddleware<StateType, ReduxAction> = (
-    StateType,
+    @escaping () -> StateType,
     @escaping ReduxActionDispatch
 ) -> ReduxActionDispatch
 
@@ -72,7 +72,7 @@ private final class ReduxMiddlewareImp<S: StateType> {
     ///
     /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
     func applyMiddlewares(
-        state: S,
+        state: @escaping () -> S,
         baseDispatch: @escaping ReduxActionDispatch
     ) -> ReduxActionDispatch {
         middlewares.reduce(baseDispatch) { next, middleware in
@@ -240,7 +240,7 @@ public final class Redux<S: StateType> {
     /// The state is updated inside a sync block to ensure thread safety.
     public func dispatch(_ action: ReduxAction) {
         let dispatcher = middleware.applyMiddlewares(
-            state: getState(),
+            state: getState,
             baseDispatch: { [weak self] action in guard let self else { return }
                 store.dispatch(action: action, reducer: reducer)
             }

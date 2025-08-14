@@ -286,12 +286,13 @@ final class ReduxStoreMiddleTests: XCTestCase {
         }
     }
 
-    fileprivate nonisolated(unsafe) let validateMiddleware: ReduxMiddleware<TestState, ReduxAction> = { _, dispatch in
+    fileprivate nonisolated(unsafe) let validateMiddleware: ReduxMiddleware<TestState, ReduxAction> = { getState, dispatch in
         { action in
             guard let action = action as? TestAction else {
                 preconditionFailure("Invalid action type")
             }
             XCTAssertTrue([TestAction.increment].contains(action))
+            XCTAssertEqual(getState().value, 0)
             dispatch(action)
         }
     }
