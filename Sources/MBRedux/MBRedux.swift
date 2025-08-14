@@ -40,8 +40,48 @@ public typealias ReduxActionDispatch = (ReduxAction) -> Void
 
 public typealias ReduxMiddleware<StateType, ReduxAction> = (
     StateType,
-    ReduxAction
-) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch
+    @escaping ReduxActionDispatch
+) -> ReduxActionDispatch
+
+/// A helper class responsible for applying a series of Redux-style middleware functions
+/// to dispatched actions in a state container (e.g., a Redux store).
+///
+/// - Note: This implementation uses a static `state` and `action` at the time of middleware composition.
+///         If your middleware needs access to dynamic state or multiple actions, consider passing `getState` instead.
+private final class ReduxMiddlewareImp<S: StateType> {
+    /// An array of middleware functions that operate on a specific state type and `ReduxAction`.
+    /// Each middleware can intercept, modify, or respond to dispatched actions.
+    let middlewares: [ReduxMiddleware<S, ReduxAction>]
+
+    /// Initializes the middleware manager with a list of middleware functions.
+    ///
+    /// - Parameter middlewares: An array of middleware functions to be applied.
+    init(middlewares: [ReduxMiddleware<S, ReduxAction>]) {
+        self.middlewares = middlewares.reversed()
+    }
+
+    /// Applies all middleware to a given dispatch chain.
+    ///
+    /// This function composes the middleware pipeline by wrapping the `baseDispatch`
+    /// function with each middleware, starting from the last and working backward.
+    ///
+    /// - Parameters:
+    ///   - state: The current state at the time of dispatch.
+    ///   - action: The action being dispatched.
+    ///   - baseDispatch: The base dispatch function, typically responsible for invoking the reducer.
+    ///
+    /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
+    func applyMiddlewares(
+        state: S,
+        baseDispatch: @escaping ReduxActionDispatch
+    ) -> ReduxActionDispatch {
+        middlewares.reduce(baseDispatch) { next, middleware in
+            middleware(state, next)
+        }
+    }
+}
+
+// MARK: -
 
 // Typealias that defines the `Reducer` type.
 // A `Reducer` takes a `ReduxAction` and a current state (`StateType`) and returns an updated state (`StateType`).
@@ -178,45 +218,6 @@ private final class ReduxStore<S: StateType>: ReduxStoreType, @unchecked Sendabl
     }
 }
 
-/// A helper class responsible for applying a series of Redux-style middleware functions
-/// to dispatched actions in a state container (e.g., a Redux store).
-///
-/// - Note: This implementation uses a static `state` and `action` at the time of middleware composition.
-///         If your middleware needs access to dynamic state or multiple actions, consider passing `getState` instead.
-private final class ReduxMiddlewareImp<S: StateType> {
-    /// An array of middleware functions that operate on a specific state type and `ReduxAction`.
-    /// Each middleware can intercept, modify, or respond to dispatched actions.
-    let middlewares: [ReduxMiddleware<S, ReduxAction>]
-
-    /// Initializes the middleware manager with a list of middleware functions.
-    ///
-    /// - Parameter middlewares: An array of middleware functions to be applied.
-    init(middlewares: [ReduxMiddleware<S, ReduxAction>]) {
-        self.middlewares = middlewares.reversed()
-    }
-
-    /// Applies all middleware to a given dispatch chain.
-    ///
-    /// This function composes the middleware pipeline by wrapping the `baseDispatch`
-    /// function with each middleware, starting from the last and working backward.
-    ///
-    /// - Parameters:
-    ///   - state: The current state at the time of dispatch.
-    ///   - action: The action being dispatched.
-    ///   - baseDispatch: The base dispatch function, typically responsible for invoking the reducer.
-    ///
-    /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
-    func applyMiddlewares(
-        state: S,
-        action: ReduxAction,
-        baseDispatch: @escaping ReduxActionDispatch
-    ) -> ReduxActionDispatch {
-        return middlewares.reduce(baseDispatch) { next, middleware in
-            middleware(state, action)(next)
-        }
-    }
-}
-
 /// Redux class encapsulates the entire Redux flow.
 /// This class includes functionality to dispatch actions, and state subscription.
 public final class Redux<S: StateType> {
@@ -240,10 +241,10 @@ public final class Redux<S: StateType> {
     public func dispatch(_ action: ReduxAction) {
         let dispatcher = middleware.applyMiddlewares(
             state: getState(),
-            action: action
-        ) { [weak self] action in guard let self else { return }
-            store.dispatch(action: action, reducer: reducer)
-        }
+            baseDispatch: { [weak self] action in guard let self else { return }
+                store.dispatch(action: action, reducer: reducer)
+            }
+        )
         dispatcher(action)
     }
 
