@@ -9,7 +9,7 @@ import Foundation
 
 /// Protocol representing an action in the Redux flow.
 /// Any action that is dispatched must conform to this protocol.
-public protocol ReduxAction {
+public protocol ReduxAction: Sendable {
     /** Use to all action */
 }
 
@@ -36,19 +36,29 @@ public extension StateType {
 
 // MARK: -
 
+//public protocol ReduxMiddlewareStore {
+//    func getState()
+//    func dispatch(_ action: ReduxAction)
+//}
 public typealias ReduxActionDispatch = (ReduxAction) -> Void
 
+public struct ReduxMiddlewareStoreContext<StateType> {
+    let getState: () -> StateType
+    let dispatchAsync: ReduxActionDispatch
+}
+
 public typealias ReduxMiddleware<StateType, ReduxAction> = (
-    @escaping () -> StateType,
+    ReduxMiddlewareStoreContext<StateType>,
     @escaping ReduxActionDispatch
 ) -> ReduxActionDispatch
 
-/// A helper class responsible for applying a series of Redux-style middleware functions
+// MARK: - ReduxMiddlewareImplentation
+/// A helper class responsible for applying a series of middleware functions
 /// to dispatched actions in a state container (e.g., a Redux store).
 ///
 /// - Note: This implementation uses a static `state` and `action` at the time of middleware composition.
 ///         If your middleware needs access to dynamic state or multiple actions, consider passing `getState` instead.
-private final class ReduxMiddlewareImp<S: StateType> {
+private struct ReduxMiddlewareMapper<S: StateType> {
     /// An array of middleware functions that operate on a specific state type and `ReduxAction`.
     /// Each middleware can intercept, modify, or respond to dispatched actions.
     let middlewares: [ReduxMiddleware<S, ReduxAction>]
@@ -72,20 +82,20 @@ private final class ReduxMiddlewareImp<S: StateType> {
     ///
     /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
     func applyMiddlewares(
-        state: @escaping () -> S,
+        context: ReduxMiddlewareStoreContext<S>,
         baseDispatch: @escaping ReduxActionDispatch
     ) -> ReduxActionDispatch {
         middlewares.reduce(baseDispatch) { next, middleware in
-            middleware(state, next)
+            middleware(context, next)
         }
     }
 }
 
-// MARK: -
+// MARK: - ReduxReducer
 
 // Typealias that defines the `Reducer` type.
 // A `Reducer` takes a `ReduxAction` and a current state (`StateType`) and returns an updated state (`StateType`).
-public typealias Reducer<StateType> = (ReduxAction, StateType) -> StateType
+public typealias ReduxReducer<StateType> = @Sendable (ReduxAction, StateType) -> StateType
 
 // MARK: - ReduxStatePublisherType
 
@@ -110,7 +120,7 @@ protocol ReduxStatePublisherType<State> {
 
 /// A private class that conforms to the `ReduxStatePublisherType` protocol.
 /// This class handles the subscription to state updates and allows for reacting to changes in the state.
-private class ReduxSubscription<S: StateType>: ReduxStatePublisherType {
+private struct ReduxSubscription<S: StateType>: ReduxStatePublisherType {
     // Publishers to track the state before and after an update
     private let beforeSateUpdate = PassthroughSubject<S, Never>()
     private let afterStateUpdate = PassthroughSubject<S, Never>()
@@ -163,7 +173,7 @@ private class ReduxSubscription<S: StateType>: ReduxStatePublisherType {
 /// A protocol that defines the required methods for a Redux store.
 /// This protocol is responsible for providing access to the application's state
 /// and dispatching actions to update the state.
-protocol ReduxStoreType<State> {
+public protocol ReduxStoreType<State> {
     /// The associated type that conforms to the `StateType` protocol, representing the store's state.
     associatedtype State: StateType
 
@@ -175,7 +185,7 @@ protocol ReduxStoreType<State> {
     /// - Parameters:
     ///   - action: The action that represents a change or event in the application.
     ///   - reducer: The reducer that will handle the action and update the state accordingly.
-    func dispatch(action: ReduxAction, reducer: @escaping Reducer<State>)
+    func dispatch(action: ReduxAction, reducer: @escaping ReduxReducer<State>)
 }
 
 // MARK: - ReduxStore
@@ -198,7 +208,7 @@ private final class ReduxStore<S: StateType>: ReduxStoreType, @unchecked Sendabl
 
     /// Dispatches an action to update the state.
     /// The state is updated inside a sync block to ensure thread safety.
-    func dispatch(action: ReduxAction, reducer: @escaping Reducer<S>) {
+    func dispatch(action: ReduxAction, reducer: @escaping ReduxReducer<S>) {
         reduxQueue.async { [weak self] in
             guard let self else { return }
             // Notify subscribers that the state will be updated.
@@ -218,6 +228,7 @@ private final class ReduxStore<S: StateType>: ReduxStoreType, @unchecked Sendabl
     }
 }
 
+// MARK: - Redux
 /// Redux class encapsulates the entire Redux flow.
 /// This class includes functionality to dispatch actions, and state subscription.
 public final class Redux<S: StateType> {
@@ -226,11 +237,10 @@ public final class Redux<S: StateType> {
     // Manage all subscriptions
     private let subscription: ReduxSubscription<S> = .init()
     // The reducer to manage state changes, initialized when registered.
-    private let reducer: Reducer<S>
+    private let reducer: ReduxReducer<S>
     // The middleware for side-effects
-    private let middleware: ReduxMiddlewareImp<S>
-
-    public init(state: S, middlewares: [ReduxMiddleware<S, ReduxAction>] = [], reducer: @escaping Reducer<S>) {
+    private let middleware: ReduxMiddlewareMapper<S>
+    public init(state: S, middlewares: [ReduxMiddleware<S, ReduxAction>] = [], reducer: @escaping ReduxReducer<S>) {
         self.reducer = reducer
         store = ReduxStore<S>(publisher: subscription, state: state)
         middleware = .init(middlewares: middlewares)
@@ -240,7 +250,7 @@ public final class Redux<S: StateType> {
     /// The state is updated inside a sync block to ensure thread safety.
     public func dispatch(_ action: ReduxAction) {
         let dispatcher = middleware.applyMiddlewares(
-            state: getState,
+            context: middleWareStore,
             baseDispatch: { [weak self] action in guard let self else { return }
                 store.dispatch(action: action, reducer: reducer)
             }
@@ -248,6 +258,16 @@ public final class Redux<S: StateType> {
         dispatcher(action)
     }
 
+    private lazy var middleWareStore: ReduxMiddlewareStoreContext<S> = .init(
+        getState: getState,
+        dispatchAsync: { action in
+            DispatchQueue(label: "com.reduxStore.queue.asyncDispatch")
+                .async { [weak self] in
+                    self?.dispatch(action)
+                }
+        }
+    )
+    
     /// Returns a publisher that emits the entire state when it changes.
     public func subscribe() -> AnyPublisher<S, Never> {
         subscription.subscribe()

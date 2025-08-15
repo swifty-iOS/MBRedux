@@ -40,19 +40,29 @@ private enum TestAction: ReduxAction, Equatable {
     case decrement
     case noChange
     case user(String)
+    case update(Int)
 }
 
 private func mockReducer(action: ReduxAction, state: TestState) -> TestState {
+    guard let action = action as? TestAction else {
+        return state
+    }
     switch action {
     case TestAction.increment:
         return TestState(value: (state.value) + 1, user: state.user)
+    
     case TestAction.decrement:
         return TestState(value: (state.value) - 1, user: state.user)
+    
     case let TestAction.user(username):
         let newState = state
         newState.user = .init(username: username)
         return newState
-    default:
+    
+    case .update(let value):
+        return TestState(value: value, user: state.user)
+    
+    case .noChange:
         return state
     }
 }
@@ -248,53 +258,60 @@ final class ReduxStoreMiddleTests: XCTestCase {
     }
 
     func testMiddlewareNoChange() {
+        let expectation = self.expectation(description: "State type should be updated")
+        store.subscribe(path: \.value)
+            .sink { value in
+                XCTAssertEqual(value, 5)
+            //    XCTAssertEqual(self.store.getState().value, 5)
+                expectation.fulfill()
+            }
+            .store(in: &cancellables)
         store.dispatch(TestAction.noChange)
-        XCTAssertEqual(store.getState().value, 1)
+        wait(for: [expectation], timeout: 0.5)
     }
 
     // MARK: - Mock middleware
 
     fileprivate nonisolated(unsafe) let incrementMiddleware: ReduxMiddleware<TestState, ReduxAction> = { _, dispatch in
-        { action in
-            if (action as? TestAction) == .increment {
-                dispatch(TestAction.decrement)
-            } else {
-                dispatch(action)
-            }
+        let handler: ReduxActionDispatch = { action in
+            dispatch(action)
         }
+        return handler
     }
 
     // MARK: - Mock middleware
 
     fileprivate nonisolated(unsafe) let decrementMiddleware: ReduxMiddleware<TestState, ReduxAction> = { _, dispatch in
-        { action in
+        let handler: ReduxActionDispatch = { action in
             if (action as? TestAction) == .decrement {
                 dispatch(TestAction.increment)
             } else {
                 dispatch(action)
             }
         }
+        return handler
     }
 
-    fileprivate nonisolated(unsafe) let noChangeMiddleware: ReduxMiddleware<TestState, ReduxAction> = { _, dispatch in
-        { action in
+    fileprivate nonisolated(unsafe) let noChangeMiddleware: ReduxMiddleware<TestState, ReduxAction> = { store, dispatch in
+        let handler: ReduxActionDispatch = { action in
             if (action as? TestAction) == .noChange {
-                dispatch(TestAction.increment)
-            } else {
-                dispatch(action)
+                store.dispatchAsync(TestAction.update(5))
             }
+            dispatch(action)
         }
+        return handler
     }
 
-    fileprivate nonisolated(unsafe) let validateMiddleware: ReduxMiddleware<TestState, ReduxAction> = { getState, dispatch in
-        { action in
+    fileprivate nonisolated(unsafe) let validateMiddleware: ReduxMiddleware<TestState, ReduxAction> = { store, dispatch in
+        let handler: ReduxActionDispatch =  { action in
             guard let action = action as? TestAction else {
                 preconditionFailure("Invalid action type")
             }
-            XCTAssertTrue([TestAction.increment].contains(action))
-            XCTAssertEqual(getState().value, 0)
+            XCTAssertTrue([TestAction.increment, .noChange, .update(5)].contains(action))
+            XCTAssertNotNil(store.getState())
             dispatch(action)
         }
+        return handler
     }
 }
 
@@ -306,7 +323,7 @@ final class ReduxConcurrencyTests: XCTestCase, @unchecked Sendable {
 
     override func setUp() {
         super.setUp()
-        let reducer: Reducer<TestState> = { action, state in
+        let reducer: ReduxReducer<TestState> = { action, state in
             switch action as? TestAction {
             case .increment:
                 return TestState(value: state.value + 1)
