@@ -36,21 +36,52 @@ public extension StateType {
 
 // MARK: -
 
-// public protocol ReduxMiddlewareStore {
-//    func getState()
-//    func dispatch(_ action: ReduxAction)
-// }
-public typealias ReduxActionDispatch = (ReduxAction) -> Void
+/// A typealias for a function that can dispatch a Redux action asynchronously.
+/// The function is marked as `@Sendable` to support concurrency-safe usage.
+public typealias ReduxActionDispatch = @Sendable (ReduxAction) -> Void
 
-public struct ReduxMiddlewareStoreContext<StateType> {
-    let getState: () -> StateType
-    let dispatchAsync: ReduxActionDispatch
+/// A typealias for a closure that returns the current Redux state.
+/// This closure is marked `@Sendable` so it can safely be used in concurrent contexts.
+///
+/// - Returns: The current state of type `State`.
+public typealias GetReduxState<State> = @Sendable () -> State
+
+/// A protocol representing the middleware store context used by Redux middleware.
+/// Provides access to the current state and an async dispatch function.
+/// The protocol is constrained to `Sendable` for use in concurrent environments.
+public protocol ReduxMiddlewareStore<State>: Sendable {
+    associatedtype State: StateType
+
+    /// A closure that returns the current state of the store.
+    var getState: GetReduxState<State> { get }
+
+    /// A closure that allows dispatching actions asynchronously.
+    var dispatchAsync: ReduxActionDispatch { get }
 }
 
+// MARK: -
+
+/// A typealias defining the structure of a Redux middleware.
+/// It takes a middleware store and a reference to the next dispatch function,
+/// and returns a new dispatch function that can intercept or modify actions.
+///
+/// - Parameters:
+///   - store: The middleware store providing access to state and dispatch.
+///   - next: The next dispatch function in the chain.
+/// - Returns: A new dispatch function that wraps/intercepts the original one.
 public typealias ReduxMiddleware<StateType, ReduxAction> = @Sendable (
-    ReduxMiddlewareStoreContext<StateType>,
+    any ReduxMiddlewareStore<StateType>,
     @escaping ReduxActionDispatch
 ) -> ReduxActionDispatch
+
+// MARK: -
+
+/// A concrete implementation of `ReduxMiddlewareStore`.
+/// Holds closures for retrieving the current state and dispatching actions.
+private struct ReduxMiddlewareStoreContext<State: StateType>: ReduxMiddlewareStore {
+    let getState: GetReduxState<State>
+    let dispatchAsync: ReduxActionDispatch
+}
 
 // MARK: - ReduxMiddlewareImplentation
 
@@ -59,6 +90,7 @@ public typealias ReduxMiddleware<StateType, ReduxAction> = @Sendable (
 ///
 /// - Note: This implementation uses a static `state` and `action` at the time of middleware composition.
 ///         If your middleware needs access to dynamic state or multiple actions, consider passing `getState` instead.
+@available(macOS 13.0.0, *)
 private struct ReduxMiddlewareMapper<S: StateType>: Sendable {
     /// An array of middleware functions that operate on a specific state type and `ReduxAction`.
     /// Each middleware can intercept, modify, or respond to dispatched actions.
@@ -83,7 +115,7 @@ private struct ReduxMiddlewareMapper<S: StateType>: Sendable {
     ///
     /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
     func applyMiddlewares(
-        context: ReduxMiddlewareStoreContext<S>,
+        context: any ReduxMiddlewareStore<S>,
         baseDispatch: @escaping ReduxActionDispatch
     ) -> ReduxActionDispatch {
         middlewares.reduce(baseDispatch) { next, middleware in
@@ -121,24 +153,24 @@ protocol ReduxStatePublisherType<State>: Sendable {
 
 /// A private class that conforms to the `ReduxStatePublisherType` protocol.
 /// This class handles the subscription to state updates and allows for reacting to changes in the state.
-private struct ReduxSubscription<S: StateType>: ReduxStatePublisherType, @unchecked Sendable {
+private struct ReduxSubscription<State: StateType>: ReduxStatePublisherType, @unchecked Sendable {
     // Publishers to track the state before and after an update
-    private let beforeSateUpdate = PassthroughSubject<S, Never>()
-    private let afterStateUpdate = PassthroughSubject<S, Never>()
+    private let beforeSateUpdate = PassthroughSubject<State, Never>()
+    private let afterStateUpdate = PassthroughSubject<State, Never>()
 
     /// Sends the state before it is updated
-    func willUpdateState(_ state: S) {
+    func willUpdateState(_ state: State) {
         beforeSateUpdate.send(state)
     }
 
     /// Sends the state after it is updated
-    func didUpdateState(_ state: S) {
+    func didUpdateState(_ state: State) {
         afterStateUpdate.send(state)
     }
 
     /// Combines `beforeStateUpdate` and `afterStateUpdate` to emit the new state only when it changes.
     /// This is useful for notifying subscribers only when the state actually changes.
-    func subscribe() -> AnyPublisher<S, Never> {
+    func subscribe() -> AnyPublisher<State, Never> {
         beforeSateUpdate
             .combineLatest(afterStateUpdate)
             .filter {
@@ -150,7 +182,7 @@ private struct ReduxSubscription<S: StateType>: ReduxStatePublisherType, @unchec
     }
 
     /// Subscribe to a specific path within the state (using KeyPath) and emit only the changed part of the state.
-    func subscribe<P: Hashable>(path: KeyPath<S, P>) -> AnyPublisher<P, Never> {
+    func subscribe<P: Hashable>(path: KeyPath<State, P>) -> AnyPublisher<P, Never> {
         beforeSateUpdate.map {
             // Access the state at the specific path before the update
             $0[keyPath: path]
@@ -180,7 +212,7 @@ public protocol ReduxStoreType<State>: Sendable {
 
     /// Returns the current state of the store.
     /// - Returns: The current state of type `S`, or `nil` if the state is not available.
-    func getState() -> State
+    var getState: GetReduxState<State> { get }
 
     /// Dispatches an action to the store, triggering a state update via the provided reducer.
     /// - Parameters:
@@ -194,22 +226,28 @@ public protocol ReduxStoreType<State>: Sendable {
 /// A private class that conforms to the `ReduxStoreType` protocol.
 /// This class is responsible for managing the application's state and dispatching actions
 /// to update the state using a reducer.
-private final class ReduxStore<S: StateType>: ReduxStoreType, @unchecked Sendable {
+private final class ReduxStore<State: StateType>: ReduxStoreType, @unchecked Sendable {
     // A dedicated queue to synchronize state changes and actions.
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
     // The current state of the store, which can be nil initially.
-    var state: S
+    var state: State
     // Subscription manager to handle state change notifications.
-    let publisher: any ReduxStatePublisherType<S>
+    let publisher: any ReduxStatePublisherType<State>
+    // get current state
+    lazy var getState: GetReduxState<State> = { [unowned self] in
+        reduxQueue.sync {
+            self.state
+        }
+    }
 
-    init(publisher: any ReduxStatePublisherType<S>, state: S) {
+    init(publisher: any ReduxStatePublisherType<State>, state: State) {
         self.publisher = publisher
         self.state = state
     }
 
     /// Dispatches an action to update the state.
     /// The state is updated inside a sync block to ensure thread safety.
-    func dispatch(action: ReduxAction, reducer: @escaping ReduxReducer<S>) {
+    func dispatch(action: ReduxAction, reducer: @escaping ReduxReducer<State>) {
         reduxQueue.async { [weak self] in
             guard let self else { return }
             // Notify subscribers that the state will be updated.
@@ -220,31 +258,29 @@ private final class ReduxStore<S: StateType>: ReduxStoreType, @unchecked Sendabl
             publisher.didUpdateState(state)
         }
     }
-
-    /// Get current state
-    func getState() -> S {
-        reduxQueue.sync {
-            self.state
-        }
-    }
 }
 
 // MARK: - Redux
 
 /// Redux class encapsulates the entire Redux flow.
 /// This class includes functionality to dispatch actions, and state subscription.
-public final class Redux<S: StateType>: Sendable {
+@available(macOS 13.0.0, *)
+public final class Redux<State: StateType>: Sendable {
     // The current state of the store, which can be nil initially.
-    private let store: any ReduxStoreType<S>
+    private let store: any ReduxStoreType<State>
     // Manage all subscriptions
-    private let subscription: ReduxSubscription<S> = .init()
+    private let subscription: ReduxSubscription<State> = .init()
     // The reducer to manage state changes, initialized when registered.
-    private let reducer: ReduxReducer<S>
+    private let reducer: ReduxReducer<State>
     // The middleware for side-effects
-    private let middleware: ReduxMiddlewareMapper<S>
-    public init(state: S, middlewares: [ReduxMiddleware<S, ReduxAction>] = [], reducer: @escaping ReduxReducer<S>) {
+    private let middleware: ReduxMiddlewareMapper<State>
+    public init(
+        state: State,
+        middlewares: [ReduxMiddleware<State, ReduxAction>] = [],
+        reducer: @escaping ReduxReducer<State>
+    ) {
         self.reducer = reducer
-        store = ReduxStore<S>(publisher: subscription, state: state)
+        store = ReduxStore<State>(publisher: subscription, state: state)
         middleware = .init(middlewares: middlewares)
     }
 
@@ -252,7 +288,10 @@ public final class Redux<S: StateType>: Sendable {
     /// The state is updated inside a sync block to ensure thread safety.
     public func dispatch(_ action: ReduxAction) {
         let dispatcher = middleware.applyMiddlewares(
-            context: .init(getState: getState, dispatchAsync: middlewareAsyncDispatch),
+            context: ReduxMiddlewareStoreContext(
+                getState: getState,
+                dispatchAsync: middlewareAsyncDispatch
+            ),
             baseDispatch: { [weak self] action in guard let self else { return }
                 store.dispatch(action: action, reducer: reducer)
             }
@@ -266,18 +305,24 @@ public final class Redux<S: StateType>: Sendable {
                 self?.dispatch(action)
             }
     }
-
-    /// Return value of State
-    func getState() -> S {
-        store.getState()
-    }
 }
 
 // MARK: - Helper method
 
+@available(macOS 13.0.0, *)
 public extension Redux {
+    /// Return value of State
+    func getState() -> State {
+        store.getState()
+    }
+
+    /// Return value at specifed path from state
+    func getState<P>(path: KeyPath<State, P>) -> P {
+        getState()[keyPath: path]
+    }
+
     /// Returns a publisher that emits the entire state when it changes.
-    func subscribe() -> AnyPublisher<S, Never> {
+    func subscribe() -> AnyPublisher<State, Never> {
         subscription.subscribe()
             .flatMap { state in
                 Future { promise in
@@ -290,24 +335,19 @@ public extension Redux {
     }
 
     /// Returns a publisher that emits a specific part of the state (based on the path) when it changes.
-    func subscribe<P: Hashable>(path: KeyPath<S, P>) -> AnyPublisher<P, Never> {
+    func subscribe<P: Hashable>(path: KeyPath<State, P>) -> AnyPublisher<P, Never> {
         subscription.subscribe(path: path)
             .receive(on: DispatchQueue.global())
             .eraseToAnyPublisher()
     }
 
     /// Returns a publisher that emits the entire state when it changes.
-    func subscribe(subscription: @escaping (S) -> Void) -> AnyCancellable {
+    func subscribe(subscription: @escaping (State) -> Void) -> AnyCancellable {
         subscribe().sink(receiveValue: subscription)
     }
 
     /// Returns a publisher that emits a specific part of the state (based on the path) when it changes.
-    func subscribe<P: Hashable>(path: KeyPath<S, P>, subscription: @escaping (P) -> Void) -> AnyCancellable {
+    func subscribe<P: Hashable>(path: KeyPath<State, P>, subscription: @escaping (P) -> Void) -> AnyCancellable {
         subscribe(path: path).sink(receiveValue: subscription)
-    }
-
-    /// Return value at specifed path from state
-    func getState<P>(path: KeyPath<S, P>) -> P {
-        getState()[keyPath: path]
     }
 }
