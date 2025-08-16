@@ -1,4 +1,15 @@
+# file options
+
+--exclude Tests/XCTestManifests.swift,Tests/BadConfig,Snapshots,Build,PluginTests
+
+# format options
 --indent 4
---linebreaks lf
---wraparguments beforefirst
 --self remove
+--allman false
+--wraparguments afterfirst
+--stripunusedargs closure-only
+--commas never
+--disable wrapMultilineStatementBraces
+--disable wrapArguments
+
+

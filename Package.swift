@@ -11,16 +11,17 @@ let package = Package(
         .library(
             name: "MBRedux",
             targets: ["MBRedux"]
-        ),
+        )
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "MBRedux"),
+            name: "MBRedux"
+        ),
         .testTarget(
             name: "MBReduxTests",
             dependencies: ["MBRedux"]
-        ),
+        )
     ]
 )

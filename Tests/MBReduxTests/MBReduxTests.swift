@@ -271,7 +271,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
 
     // MARK: - Mock middleware
 
-    fileprivate let incrementMiddleware: ReduxMiddleware<TestState, ReduxAction> = { _, dispatch in
+    fileprivate let incrementMiddleware: ReduxMiddleware<TestState> = { _, dispatch in
         let handler: ReduxActionDispatch = { action in
             dispatch(action)
         }
@@ -280,7 +280,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
 
     // MARK: - Mock middleware
 
-    fileprivate let decrementMiddleware: ReduxMiddleware<TestState, ReduxAction> = { _, dispatch in
+    fileprivate let decrementMiddleware: ReduxMiddleware<TestState> = { _, dispatch in
         let handler: ReduxActionDispatch = { action in
             if (action as? TestAction) == .decrement {
                 dispatch(TestAction.increment)
@@ -291,7 +291,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         return handler
     }
 
-    fileprivate let noChangeMiddleware: ReduxMiddleware<TestState, ReduxAction> = { store, dispatch in
+    fileprivate let noChangeMiddleware: ReduxMiddleware<TestState> = { store, dispatch in
         let handler: ReduxActionDispatch = { action in
             if (action as? TestAction) == .noChange {
                 store.dispatchAsync(TestAction.update(5))
@@ -301,7 +301,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         return handler
     }
 
-    fileprivate let validateMiddleware: ReduxMiddleware<TestState, ReduxAction> = { store, dispatch in
+    fileprivate let validateMiddleware: ReduxMiddleware<TestState> = { store, dispatch in
         let handler: ReduxActionDispatch = { action in
             guard let action = action as? TestAction else {
                 preconditionFailure("Invalid action type")

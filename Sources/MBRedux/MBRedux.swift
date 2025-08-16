@@ -69,7 +69,7 @@ public protocol ReduxMiddlewareStore<State>: Sendable {
 ///   - store: The middleware store providing access to state and dispatch.
 ///   - next: The next dispatch function in the chain.
 /// - Returns: A new dispatch function that wraps/intercepts the original one.
-public typealias ReduxMiddleware<StateType, ReduxAction> = @Sendable (
+public typealias ReduxMiddleware<StateType> = @Sendable (
     any ReduxMiddlewareStore<StateType>,
     @escaping ReduxActionDispatch
 ) -> ReduxActionDispatch
@@ -91,15 +91,15 @@ private struct ReduxMiddlewareStoreContext<State: StateType>: ReduxMiddlewareSto
 /// - Note: This implementation uses a static `state` and `action` at the time of middleware composition.
 ///         If your middleware needs access to dynamic state or multiple actions, consider passing `getState` instead.
 @available(macOS 13.0.0, *)
-private struct ReduxMiddlewareMapper<S: StateType>: Sendable {
+private struct ReduxMiddlewareMapper<State: StateType>: Sendable {
     /// An array of middleware functions that operate on a specific state type and `ReduxAction`.
     /// Each middleware can intercept, modify, or respond to dispatched actions.
-    let middlewares: [ReduxMiddleware<S, ReduxAction>]
+    let middlewares: [ReduxMiddleware<State>]
 
     /// Initializes the middleware manager with a list of middleware functions.
     ///
     /// - Parameter middlewares: An array of middleware functions to be applied.
-    init(middlewares: [ReduxMiddleware<S, ReduxAction>]) {
+    init(middlewares: [ReduxMiddleware<State>]) {
         self.middlewares = middlewares.reversed()
     }
 
@@ -115,7 +115,7 @@ private struct ReduxMiddlewareMapper<S: StateType>: Sendable {
     ///
     /// - Returns: A new `ReduxActionDispatch` function that has all middleware applied.
     func applyMiddlewares(
-        context: any ReduxMiddlewareStore<S>,
+        context: any ReduxMiddlewareStore<State>,
         baseDispatch: @escaping ReduxActionDispatch
     ) -> ReduxActionDispatch {
         middlewares.reduce(baseDispatch) { next, middleware in
@@ -276,7 +276,7 @@ public final class Redux<State: StateType>: Sendable {
     private let middleware: ReduxMiddlewareMapper<State>
     public init(
         state: State,
-        middlewares: [ReduxMiddleware<State, ReduxAction>] = [],
+        middlewares: [ReduxMiddleware<State>] = [],
         reducer: @escaping ReduxReducer<State>
     ) {
         self.reducer = reducer
