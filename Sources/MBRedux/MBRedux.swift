@@ -185,7 +185,7 @@ private final class ReduxStore<State: StateType>: ReduxStoreType, @unchecked Sen
     }
     
     func subscribe() -> AnyPublisher<State, Never> {
-        publisher.eraseToAnyPublisher().dropFirst().eraseToAnyPublisher()
+        publisher.eraseToAnyPublisher()
     }
     
 }
@@ -228,8 +228,9 @@ public final class Redux<State: StateType>: Sendable {
                 store.dispatch(action: action, reducer: reducer)
             }
         )
-        dispatchQueue.async { [action] in
-            print("MB: dispatch action: \(action)")
+        
+        dispatchQueue.async {
+            print("MB: Redux -> dispatching action: \(action)")
             dispatcher(action)
         }
     }
@@ -267,6 +268,8 @@ public extension Redux {
     /// Returns a publisher that emits the entire state when it changes.
     func subscribe() -> AnyPublisher<State, Never> {
         store.subscribe()
+            .dropFirst()
+            .eraseToAnyPublisher()
     }
 
     /// Returns a publisher that emits a specific part of the state (based on the path) when it changes.
