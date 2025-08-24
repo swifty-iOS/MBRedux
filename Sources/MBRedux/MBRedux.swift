@@ -74,7 +74,6 @@ public typealias ReduxMiddleware<StateType> = @Sendable (
     @escaping ReduxActionDispatch
 ) -> ReduxActionDispatch
 
-
 // MARK: - ReduxReducer
 
 // Typealias that defines the `Reducer` type.
@@ -88,8 +87,9 @@ protocol ReduxStatePublisherType<State>: Publisher where Failure == Never, Outpu
     /// The associated type that conforms to the `StateType` protocol,
     /// representing the application's state.
     associatedtype State: StateType
-    
+
     // MARK: Methods
+
     func getState() -> State
     func setState(_ state: State)
 }
@@ -102,25 +102,26 @@ protocol ReduxStatePublisherType<State>: Publisher where Failure == Never, Outpu
 public protocol ReduxStoreType<State>: Sendable {
     /// The associated type that conforms to the `StateType` protocol, representing the store's state.
     associatedtype State: StateType
-    
+
     /// Returns the current state of the store.
     /// - Returns: The current state of type `S`, or `nil` if the state is not available.
     var getState: GetReduxState<State> { get }
-    
+
     /// Dispatches an action to the store, triggering a state update via the provided reducer.
     /// - Parameters:
     ///   - action: The action that represents a change or event in the application.
     ///   - reducer: The reducer that will handle the action and update the state accordingly.
     func dispatch(action: ReduxAction, reducer: @escaping ReduxReducer<State>)
-    
+
     /// Subscribe the state
     func subscribe() -> AnyPublisher<State, Never>
 }
 
 // MARK: - Implemenation
-//--------------------------
+
+// --------------------------
 // **  Implemenation **
-//--------------------------
+// --------------------------
 
 /// A concrete implementation of `ReduxMiddlewareStore`.
 /// Holds closures for retrieving the current state and dispatching actions.
@@ -134,21 +135,20 @@ private struct ReduxMiddlewareStoreContext<State: StateType>: ReduxMiddlewareSto
 /// A private class that conforms to the `ReduxStatePublisherType` protocol.
 /// This class handles the subscription to state updates and allows for reacting to changes in the state.
 private struct ReduxStatePublisher<State: StateType>: ReduxStatePublisherType {
-    
     private let currentState: CurrentValueSubject<State, Never>
-    
+
     init(state: State) {
-        self.currentState = .init(state)
+        currentState = .init(state)
     }
-    
-    func receive<S>(subscriber: S) where S : Subscriber, Never == S.Failure, State == S.Input {
+
+    func receive<S>(subscriber: S) where S: Subscriber, Never == S.Failure, State == S.Input {
         currentState.subscribe(subscriber)
     }
-    
+
     func getState() -> State {
         currentState.value
     }
-    
+
     func setState(_ state: State) {
         currentState.send(state)
     }
@@ -162,7 +162,7 @@ private struct ReduxStatePublisher<State: StateType>: ReduxStatePublisherType {
 private final class ReduxStore<State: StateType>: ReduxStoreType, @unchecked Sendable {
     // A dedicated queue to synchronize state changes and actions.
     private let reduxQueue = DispatchQueue(label: "com.reduxStore.queue")
-   
+
     // Subscription manager to handle state change notifications.
     private let publisher: any ReduxStatePublisherType<State>
     // get current state
@@ -183,11 +183,10 @@ private final class ReduxStore<State: StateType>: ReduxStoreType, @unchecked Sen
         // Notify subscribers that the state will be updated.
         publisher.setState(newState)
     }
-    
+
     func subscribe() -> AnyPublisher<State, Never> {
         publisher.eraseToAnyPublisher()
     }
-    
 }
 
 // MARK: - Redux
@@ -203,7 +202,7 @@ public final class Redux<State: StateType>: Sendable {
     // The middleware for side-effects
     private let middlewares: [ReduxMiddleware<State>]
     private let dispatchQueue = DispatchQueue(label: "com.redux.reducer.dispatchQueue")
-    
+
     public init(
         state: State,
         middlewares: [ReduxMiddleware<State>] = [],
@@ -228,9 +227,8 @@ public final class Redux<State: StateType>: Sendable {
                 store.dispatch(action: action, reducer: reducer)
             }
         )
-        
+
         dispatchQueue.async {
-            print("MB: Redux -> dispatching action: \(action)")
             dispatcher(action)
         }
     }
@@ -244,7 +242,7 @@ public final class Redux<State: StateType>: Sendable {
             middleware(context, next)
         }
     }
-    
+
     private func middlewareDispatch(action: ReduxAction) {
         dispatchQueue.async { [weak self] in
             self?.dispatch(action)
@@ -253,13 +251,14 @@ public final class Redux<State: StateType>: Sendable {
 }
 
 // MARK: - Helper method
+
 @available(macOS 13.0.0, *)
 public extension Redux {
     /// Return value of State
     var getState: @Sendable () -> State {
         store.getState
     }
-    
+
     /// Return value at specifed path from state
     func getState<P>(_ childState: KeyPath<State, P>) -> P where P: StateType {
         getState()[keyPath: childState]
@@ -285,19 +284,21 @@ public extension Redux {
             .map { $0[keyPath: path] }
             .eraseToAnyPublisher()
     }
-    
+
     /// Returns a publisher that emits the entire state when it changes.
     func subscribe(subscription: @escaping (State) -> Void) -> AnyCancellable {
         subscribe().sink(receiveValue: subscription)
     }
-    
+
     /// Returns a publisher that emits a specific part of the state (based on the path) when it changes.
-    func subscribe<P>(_ childState: KeyPath<State, P>, subscription: @escaping (P) -> Void) -> AnyCancellable where P: StateType {
+    func subscribe<P>(_ childState: KeyPath<State, P>,
+                      subscription: @escaping (P) -> Void) -> AnyCancellable where P: StateType {
         subscribe(childState).sink(receiveValue: subscription)
     }
-    
+
     /// Returns a publisher that emits a specific part of the state (based on the path) when it changes.
-    func subscribe<P>(path: KeyPath<State, P>, subscription: @escaping (P) -> Void) -> AnyCancellable where P: Hashable {
+    func subscribe<P>(path: KeyPath<State, P>,
+                      subscription: @escaping (P) -> Void) -> AnyCancellable where P: Hashable {
         subscribe(path: path).sink(receiveValue: subscription)
     }
 }
