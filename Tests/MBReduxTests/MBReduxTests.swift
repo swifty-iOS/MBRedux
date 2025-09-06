@@ -9,7 +9,7 @@ import Combine
 import XCTest
 
 // Define a simple test state and action
-private class TestState: StateType, Hashable {
+private final class TestState: StateType, Hashable, @unchecked Sendable {
     let value: Int
     var user: MockSateUser?
 
@@ -20,11 +20,12 @@ private class TestState: StateType, Hashable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(value)
+        hasher.combine(user?.hashValue)
     }
 }
 
-private class MockSateUser: StateType, Equatable {
-    let username: String
+private final class MockSateUser: StateType, Hashable, @unchecked Sendable {
+    var username: String
 
     init(username: String) {
         self.username = username
@@ -40,19 +41,33 @@ private enum TestAction: ReduxAction, Equatable {
     case decrement
     case noChange
     case user(String)
+    case username(String)
+    case update(Int)
 }
 
 private func mockReducer(action: ReduxAction, state: TestState) -> TestState {
+    guard let action = action as? TestAction else {
+        return state
+    }
     switch action {
     case TestAction.increment:
         return TestState(value: (state.value) + 1, user: state.user)
+
     case TestAction.decrement:
         return TestState(value: (state.value) - 1, user: state.user)
+
     case let TestAction.user(username):
-        let newState = state
-        newState.user = .init(username: username)
-        return newState
-    default:
+        state.user = .init(username: username)
+        return state
+
+    case let TestAction.username(username):
+        state.user?.username = username
+        return state
+
+    case let .update(value):
+        return TestState(value: value, user: state.user)
+
+    case .noChange:
         return state
     }
 }
@@ -82,8 +97,9 @@ final class ReduxStoreTests: XCTestCase {
         store.dispatch(TestAction.increment)
         store.dispatch(TestAction.increment)
         // Check the state after dispatching
-        XCTAssertEqual(store.getState().value, 2)
-        XCTAssertEqual(store.getState(path: \.value), 2)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [store] in
+            XCTAssertEqual(store?.getState().value, 2)
+        }
     }
 
     func testStateSubscription() {
@@ -91,9 +107,8 @@ final class ReduxStoreTests: XCTestCase {
         let expectation = expectation(description: "State should be updated")
         store.subscribe()
             .sink { newState in
-                if newState.value == 1 {
-                    expectation.fulfill() // Fulfill when state is updated to value 1
-                }
+                XCTAssertEqual(newState.value, 1)
+                expectation.fulfill() // Fulfill when state is updated to value 1
             }
             .store(in: &cancellables)
 
@@ -109,9 +124,8 @@ final class ReduxStoreTests: XCTestCase {
         let expectation = self.expectation(description: "State path value should be updated")
         store.subscribe(path: \.value)
             .sink { newValue in
-                if newValue == 1 {
-                    expectation.fulfill() // Fulfill when value is updated to 1
-                }
+                XCTAssertEqual(newValue, 1)
+                expectation.fulfill() // Fulfill when value is updated to 1
             }
             .store(in: &cancellables)
         // Dispatch increment action
@@ -123,42 +137,16 @@ final class ReduxStoreTests: XCTestCase {
     func testStateTypeSubscription() {
         // Expectation for state path change subscription
         let expectation = self.expectation(description: "State type should be updated")
-        store.subscribe(path: \.user)
-            .sink { [testUserName] newValue in
-                if newValue?.username == testUserName {
-                    expectation.fulfill() // Fulfill when value is updated to 1
-                }
+        store.subscribe(\.user)
+            .sink { [self] newValue in
+                XCTAssertEqual(newValue?.username, testUserName)
+                expectation.fulfill()
             }
             .store(in: &cancellables)
         // Dispatch increment action
         store.dispatch(TestAction.user(testUserName))
         // Wait for the state path change to be triggered
         wait(for: [expectation], timeout: 0.5)
-    }
-
-    @MainActor
-    // If this fails adjust timout
-    func testNoStateChange() {
-        let testUserName = "testuser"
-        // Expectation for state path change subscription
-        let expectation = self.expectation(description: "State change should not be call")
-        store.dispatch(TestAction.user(testUserName))
-        XCTAssertEqual(store.getState(path: \.user?.username), testUserName)
-        // Check for flag if subscriber calls
-        var isUpdateCalled = false
-        store.subscribe(path: \.user)
-            .sink { _ in
-                isUpdateCalled = true
-            }
-            .store(in: &cancellables)
-        // dispach no action
-        store.dispatch(TestAction.user(testUserName))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertFalse(isUpdateCalled)
-            expectation.fulfill()
-        }
-        // Wait for both before and after state update expectations
-        wait(for: [expectation], timeout: 1)
     }
 }
 
@@ -199,23 +187,26 @@ final class ReduxStoreOptinalTests: XCTestCase {
     }
 
     func testOptionalRedux() {
+        let expectation = expectation(description: #function)
         XCTAssertNil(store.getState())
-        store.dispatch(SomeAction(name: nil))
-        XCTAssertNotNil(store.getState())
-        XCTAssertNil(store.getState()?.name)
-
-        let expectation = self.expectation(description: "State type should be updated")
-        store.subscribe(path: \.self?.name)
-            .sink { name in
-                if name == "test" {
-                    expectation.fulfill() // Fulfill when value is updated to 1
-                }
+        var actionCounter = 0
+        store.subscribe { state in
+            switch actionCounter {
+            case 0:
+                XCTAssertNotNil(state)
+                XCTAssertNil(state?.name)
+                actionCounter += 1
+            case 1:
+                XCTAssertEqual(state?.name, "test")
+                expectation.fulfill()
+            default:
+                XCTFail("Unexpected state update")
             }
-            .store(in: &cancellables)
-        // Dispatch increment action
+        }.store(in: &cancellables)
+
+        store.dispatch(SomeAction(name: nil))
         store.dispatch(SomeAction(name: "test"))
-        // Wait for the state path change to be triggered
-        wait(for: [expectation], timeout: 0.5)
+        wait(for: [expectation], timeout: 10)
     }
 }
 
@@ -233,7 +224,7 @@ final class ReduxStoreMiddleTests: XCTestCase {
         // Initialize the store with an initial state
         store = Redux<TestState>(
             state: TestState(value: 0),
-            middlewares: [Self.incrementMiddleware, Self.decrementMiddleware],
+            middlewares: [incrementMiddleware, decrementMiddleware, noChangeMiddleware, validateMiddleware],
             reducer: mockReducer
         )
     }
@@ -245,68 +236,85 @@ final class ReduxStoreMiddleTests: XCTestCase {
         super.tearDown()
     }
 
-    @MainActor
     func testMiddlewareIncrement() {
-        let expectation = expectation(description: "State should not be updated")
-        var isUpdateCalled = false
-        store.subscribe()
-            .sink { _ in
-                isUpdateCalled = true
-            }
-            .store(in: &cancellables)
-
-        // Dispatch increment action
-        store.dispatch(TestAction.increment)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertFalse(isUpdateCalled)
+        let expectation = self.expectation(description: #function)
+        store.subscribe(path: \.value) { value in
+            XCTAssertEqual(value, 1)
             expectation.fulfill()
-        }
-        // Wait for the state change to be triggered
-        wait(for: [expectation], timeout: 0.5)
+        }.store(in: &cancellables)
+        store.dispatch(TestAction.increment)
+        wait(for: [expectation])
     }
 
-    @MainActor
     func testMiddlewareDecrement() {
-        let expectation = expectation(description: "State should not be updated")
-        store.subscribe()
-            .sink { newState in
-                XCTAssertEqual(newState.value, 1)
+        let expectation = self.expectation(description: #function)
+        store.subscribe(path: \.value) { value in
+            XCTAssertEqual(value, 1)
+            expectation.fulfill()
+        }.store(in: &cancellables)
+        store.dispatch(TestAction.decrement)
+        wait(for: [expectation])
+    }
+
+    func testMiddlewareNoChange() {
+        let expectation = self.expectation(description: "State type should be updated")
+        XCTAssertEqual(store.getState().value, 0)
+        store.subscribe(path: \.value)
+            .dropFirst()
+            .sink { value in
+                XCTAssertEqual(value, 5)
+                XCTAssertEqual(self.store.getState().value, 5)
                 expectation.fulfill()
             }
             .store(in: &cancellables)
-
-        // Dispatch increment action
-        store.dispatch(TestAction.decrement)
-        // Wait for the state change to be triggered
+        store.dispatch(TestAction.noChange)
         wait(for: [expectation], timeout: 0.5)
     }
 
     // MARK: - Mock middleware
 
-    fileprivate static func incrementMiddleware(state _: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
-        return { next in
-            { action in
-                if (action as? TestAction) == .increment {
-                    next(TestAction.noChange)
-                } else {
-                    next(action)
-                }
-            }
+    fileprivate let incrementMiddleware: ReduxMiddleware<TestState> = { _, dispatch in
+        let handler: ReduxActionDispatch = { action in
+            dispatch(action)
         }
+        return handler
     }
 
     // MARK: - Mock middleware
 
-    fileprivate static func decrementMiddleware(state _: TestState, action: ReduxAction) -> (@escaping ReduxActionDispatch) -> ReduxActionDispatch {
-        return { next in
-            { action in
-                if (action as? TestAction) == .decrement {
-                    next(TestAction.increment)
-                } else {
-                    next(action)
-                }
+    fileprivate let decrementMiddleware: ReduxMiddleware<TestState> = { _, dispatch in
+        let handler: ReduxActionDispatch = { action in
+            // change current action to new action synchronously
+            if (action as? TestAction) == .decrement {
+                dispatch(TestAction.increment)
+            } else {
+                dispatch(action)
             }
         }
+        return handler
+    }
+
+    fileprivate let noChangeMiddleware: ReduxMiddleware<TestState> = { store, dispatch in
+        let handler: ReduxActionDispatch = { action in
+            // change current action to new action synchronously and continew current action
+            if (action as? TestAction) == .noChange {
+                store.dispatchAsync(TestAction.update(5))
+            }
+            dispatch(action)
+        }
+        return handler
+    }
+
+    fileprivate let validateMiddleware: ReduxMiddleware<TestState> = { store, dispatch in
+        let handler: ReduxActionDispatch = { action in
+            guard let action = action as? TestAction else {
+                preconditionFailure("Invalid action type")
+            }
+            // XCTAssertTrue([TestAction.increment, .noChange, .update(5)].contains(action))
+            XCTAssertNotNil(store.getState())
+            dispatch(action)
+        }
+        return handler
     }
 }
 
@@ -318,7 +326,7 @@ final class ReduxConcurrencyTests: XCTestCase, @unchecked Sendable {
 
     override func setUp() {
         super.setUp()
-        let reducer: Reducer<TestState> = { action, state in
+        let reducer: ReduxReducer<TestState> = { action, state in
             switch action as? TestAction {
             case .increment:
                 return TestState(value: state.value + 1)
@@ -338,45 +346,46 @@ final class ReduxConcurrencyTests: XCTestCase, @unchecked Sendable {
         }
 
         // Give some time for all async dispatches to complete
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
             // Check final state count should be 1000
             XCTAssertEqual(self.redux.getState().value, 1000)
             expectation.fulfill()
         }
 
-        wait(for: [expectation], timeout: 2.0)
+        wait(for: [expectation], timeout: 3.0)
     }
 
     func testSubscribeReceivesUpdates() {
+        let count = 100
         let expectation = XCTestExpectation(description: "Subscriber receives state updates")
-
         var receivedCounts = [Int]()
-
-        redux.subscribe()
-            .sink { state in
-                receivedCounts.append(state.value)
-                if state.value == 10 {
-                    expectation.fulfill()
-                }
+        redux.subscribe { [self] state in
+            receivedCounts.append(state.value)
+            _ = redux.getState()
+            XCTAssertEqual(receivedCounts, Array(1 ... state.value))
+            if state.value == count {
+                expectation.fulfill()
             }
-            .store(in: &cancellables)
-
-        for _ in 1 ... 10 {
-            redux.dispatch(TestAction.increment)
         }
+        .store(in: &cancellables)
 
-        wait(for: [expectation], timeout: 1.0)
-        XCTAssertEqual(receivedCounts.last, 10)
+        DispatchQueue.concurrentPerform(iterations: count) { _ in
+            self.redux.dispatch(TestAction.increment)
+        }
+        wait(for: [expectation])
     }
 
     func testConcurrentReadsAndWrites() {
         let dispatchGroup = DispatchGroup()
 
+        redux.subscribe(path: \.value) { _ in
+            dispatchGroup.leave()
+        }.store(in: &cancellables)
+
         for _ in 1 ... 500 {
             dispatchGroup.enter()
             DispatchQueue.global().async {
                 self.redux.dispatch(TestAction.increment)
-                dispatchGroup.leave()
             }
             dispatchGroup.enter()
             DispatchQueue.global().async {

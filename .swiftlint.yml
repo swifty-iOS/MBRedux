@@ -1,3 +1,7 @@
-line_length:
-  warning: 150
-  error: 150
+excluded:
+  - "*Tests/*"
+  - "*Tests.swift"
+  
+force_cast: warning # implicitly
+force_try:
+  severity: warning # explicitly
