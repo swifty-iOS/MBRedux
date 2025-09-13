@@ -275,6 +275,7 @@ public extension Redux {
     func subscribe<P>(_ childState: KeyPath<State, P>) -> AnyPublisher<P, Never> where P: StateType {
         subscribe()
             .map { $0[keyPath: childState] }
+            .removeDuplicates()
             .eraseToAnyPublisher()
     }
 
@@ -282,6 +283,7 @@ public extension Redux {
     func subscribe<P>(path: KeyPath<State, P>) -> AnyPublisher<P, Never> where P: Hashable {
         subscribe()
             .map { $0[keyPath: path] }
+            .removeDuplicates()
             .eraseToAnyPublisher()
     }
 
